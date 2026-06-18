@@ -26,6 +26,16 @@ df.columns = (
 
 print(df.columns)
 
+
+
+#------------------NUEVO-------------------#
+
+df["distrito"] = df["distrito"].astype(str).str.strip()
+df["distrito"] = df["distrito"].str.replace(r"\s+", " ", regex=True)
+df["distrito"] = df["distrito"].str.replace(r"\s*\d+/\s*(?:\d+/\s*)*$", "", regex=True)
+df["distrito"] = df["distrito"].str.strip()
+#---------------------------------------------
+
 # ANALISIS EXPLORATORIO
 
 
@@ -60,23 +70,94 @@ print(residuos_por_region)
 df = df.sort_values(["ubigeo", "periodo"])
 
 
+#cambio para evitar divisiones entre cero
+df["porc_urbana"] = np.where(
+    df["pob_total"] > 0,
+    df["pob_urbana"] / df["pob_total"],
+    np.nan
+)
 
-# Porcentaje de población urbana
-df["porc_urbana"] = df["pob_urbana"] / df["pob_total"]
+df["porc_rural"] = np.where(
+    df["pob_total"] > 0,
+    df["pob_rural"] / df["pob_total"],
+    np.nan
+)
 
-# Porcentaje de población rural
-df["porc_rural"] = df["pob_rural"] / df["pob_total"]
-
-# Residuos por habitante urbano al año en kg
-df["residuos_kg_hab_anual"] = (df["qresiduos_dom"] * 1000) / df["pob_urbana"]
-
+df["residuos_kg_hab_anual"] = np.where(
+    df["pob_urbana"] > 0,
+    (df["qresiduos_dom"] * 1000) / df["pob_urbana"],
+    np.nan
+)
 
 
 # Variación anual de generación de residuos por distrito
 df["variacion_anual_residuos"] = df.groupby("ubigeo")["qresiduos_dom"].pct_change()
 
+df["variacion_anual_residuos"] = df["variacion_anual_residuos"].replace(
+    [np.inf, -np.inf],
+    np.nan
+)
+
 # Promedio histórico de generación por distrito
 df["promedio_residuos_distrito"] = df.groupby("ubigeo")["qresiduos_dom"].transform("mean")
+
+#--------------cambio-------------#
+
+# Generación acumulada de residuos por distrito
+df["generacion_acumulada"] = df.groupby("ubigeo")["qresiduos_dom"].cumsum()
+
+# Generación acumulada previa
+df["generacion_acumulada_previa"] = (df["generacion_acumulada"] - df["qresiduos_dom"])
+
+# Generación total histórica por distrito
+df["generacion_total_historica"] = (
+    df.groupby("ubigeo")["qresiduos_dom"]
+    .transform("sum")
+)
+
+# Cambio total de residuos entre el primer y último año disponible por distrito
+def calcular_cambio_total(serie):
+    serie = serie.dropna()
+    serie = serie[serie > 0]
+
+    if len(serie) < 2:
+        return np.nan
+
+    return (serie.iloc[-1] - serie.iloc[0]) / serie.iloc[0]
+
+df["cambio_total_residuos"] = (
+    df.groupby("ubigeo")["qresiduos_dom"]
+    .transform(calcular_cambio_total)
+)
+
+# Tendencia de crecimiento según el cambio total
+df["tendencia_crecimiento"] = np.select(
+    [
+        df["cambio_total_residuos"] > 0.05,
+        df["cambio_total_residuos"] < -0.05
+    ],
+    [
+        "Creciente",
+        "Decreciente"
+    ],
+    default="Estable"
+)
+
+# Cuando no hay datos suficientes
+df.loc[
+    df["cambio_total_residuos"].isna(),
+    "tendencia_crecimiento"
+] = "Sin datos suficientes"
+
+
+
+
+
+
+
+
+
+
 
 # Categoría de generación
 df["categoria_generacion"] = pd.qcut(
@@ -86,3 +167,22 @@ df["categoria_generacion"] = pd.qcut(
 )
 
 print(df.head())
+
+
+# Verificar las nuevas variables
+df[
+    [
+        "ubigeo",
+        "distrito",
+        "periodo",
+        "qresiduos_dom",
+        "variacion_anual_residuos",
+        "promedio_residuos_distrito",
+        "generacion_acumulada",
+        "generacion_acumulada_previa",
+        "cambio_total_residuos",
+        "tendencia_crecimiento",
+        "categoria_generacion"
+    ]
+].head(20)
+
