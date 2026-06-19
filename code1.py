@@ -186,3 +186,47 @@ df[
     ]
 ].head(20)
 
+# ORDENAR FILAS
+df = df.sort_values(["departamento", "provincia", "distrito", "periodo"])
+
+# ORDENAR COLUMNAS
+columnas_ordenadas = [
+    "fecha_corte",
+    "periodo",
+    "n_sec",
+    "ubigeo",
+    "reg_nat",
+    "departamento",
+    "provincia",
+    "distrito",
+    "pob_total",
+    "pob_urbana",
+    "pob_rural",
+    "gpc_dom",
+    "qresiduos_dom",
+    "porc_urbana",
+    "porc_rural",
+    "residuos_kg_hab_anual",
+    "variacion_anual_residuos",
+    "promedio_residuos_distrito",
+    "generacion_acumulada",
+    "generacion_acumulada_previa",
+    "generacion_total_historica",
+    "cambio_total_residuos",
+    "tendencia_crecimiento",
+    "categoria_generacion"
+]
+
+# Mantener solo columnas existentes
+columnas_ordenadas = [col for col in columnas_ordenadas if col in df.columns]
+
+df_ordenado = df[columnas_ordenadas]
+
+# EXPORTAR A EXCEL
+df_ordenado.to_excel(
+    "dataset_residuos_limpio_ordenado.xlsx",
+    index=False
+)
+
+print("Archivo Excel generado correctamente.")
+
