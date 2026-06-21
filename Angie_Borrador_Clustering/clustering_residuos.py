@@ -10,7 +10,7 @@ from sklearn.metrics import silhouette_score
 # carga del dataset
 
 
-RUTA_DATA = os.path.join("data", "DataSet_LIMPIO.csv")
+RUTA_DATA = os.path.join("data", "../DataSet_LIMPIO.csv")
 
 df = pd.read_csv(RUTA_DATA, encoding="utf-8", sep=";")
 
