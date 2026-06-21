@@ -17,10 +17,9 @@ from sklearn.linear_model import Ridge
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-# LIMPIEZA--------------------------------------------------------------------------------------------
 
-# Cargar dataset principal
-df = pd.read_csv("1. DataSet Generación Anual de residuos sólidos domiciliario_Distrital_2014_2024.csv", encoding='latin-1', sep=';')
+# Cargar dataset limpio 
+df = pd.read_csv("DataSet_LIMPIO.csv", encoding='utf-8', sep=';')
 
 # Visualizar primeras filas
 print(df.head())
@@ -30,27 +29,7 @@ print(df.info())
 
 # Revisar valores nulos
 print(df.isnull().sum())
-
-# Estandarizar nombres de columnas
-df.columns = (
-    df.columns
-    .str.strip() #borra espacios al inicio y al final
-    .str.lower() #convierte a minuscula
-    .str.replace(" ", "_") #reemplaza espacios por guiones bajos
-    .str.replace(".", "", regex=False) #borra puntos
-)
-
 print(df.columns)
-
-
-
-#------------------NUEVO-------------------#
-
-df["distrito"] = df["distrito"].astype(str).str.strip()
-df["distrito"] = df["distrito"].str.replace(r"\s+", " ", regex=True)
-df["distrito"] = df["distrito"].str.replace(r"\s*\d+/\s*(?:\d+/\s*)*$", "", regex=True)
-df["distrito"] = df["distrito"].str.strip()
-#---------------------------------------------
 
 #-----------------------------------------------------------------------------------------------------------
 
