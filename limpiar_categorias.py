@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Cargar dataset
-df = pd.read_csv("1. DataSet Generación Anual de residuos sólidos domiciliario_Distrital_2014_2024.csv", encoding='latin-1', sep=';')
+df = pd.read_csv("1. DataSet Generación Anual de residuos sólidos domiciliario_Distrital_2014_2024.csv", encoding='cp1252', sep=';')
 
 # Estandarizar nombres de columnas
 df.columns = (
@@ -31,6 +31,14 @@ def normalizar_texto(texto):
         return texto
 
     texto = str(texto).strip()
+
+    # Reparar mojibake frecuente: texto UTF-8 interpretado como Latin-1/Windows-1252.
+    # Ejemplos: "CHAVIÃ‘A" -> "CHAVIÑA", "CHAVÃN" -> "CHAVÍN".
+    if 'Ã' in texto or 'Â' in texto:
+        try:
+            texto = texto.encode('latin-1').decode('utf-8')
+        except UnicodeError:
+            pass
 
     # Reemplazar caracteres especiales mal codificados
     reemplazos = {
@@ -62,8 +70,19 @@ def sin_acentos(texto):
     """Devuelve el texto en mayúsculas y sin tildes/diacríticos, para comparar de forma robusta."""
     if pd.isna(texto):
         return texto
+    texto = normalizar_texto(texto)
     texto = unicodedata.normalize('NFKD', str(texto).upper())
     return ''.join(c for c in texto if not unicodedata.combining(c)).strip()
+
+
+def clave_filtro_texto(texto):
+    """Clave auxiliar para filtrar nombres ignorando tildes, ñ y espacios duplicados."""
+    if pd.isna(texto):
+        return texto
+
+    texto = sin_acentos(texto)
+    texto = re.sub(r'[^A-Z0-9]+', ' ', texto)
+    return ' '.join(texto.split())
 
 
 def normalizar_ubigeo(valor):
@@ -106,6 +125,21 @@ def correccion_manual_provincia(valor):
         return 'CARLOS FERMÍN FITZCARRALD'
 
     return valor
+
+
+def correccion_manual_distrito(valor):
+    if pd.isna(valor):
+        return valor
+
+    base = clave_filtro_texto(valor)
+    correcciones = {
+        'CHAVIN': 'CHAVÍN',
+        'CHAVIN DE HUANTAR': 'CHAVÍN DE HUÁNTAR',
+        'CHAVIN DE PARIARCA': 'CHAVÍN DE PARIARCA',
+        'JUNIN': 'JUNÍN',
+    }
+
+    return correcciones.get(base, valor)
 
 
 # Provincias que NUNCA deben ser eliminadas/fusionadas por el fuzzy matching,
@@ -267,8 +301,9 @@ def limpiar_columna(df, columna):
 
 columnas_a_limpiar = ['departamento', 'provincia']
 
-# Para distritos: solo normalizar, sin fuzzy matching
-df['distrito'] = df['distrito'].apply(normalizar_texto)
+# Para distritos: normalizar y corregir acentos conocidos, sin fuzzy matching
+df['distrito'] = df['distrito'].apply(normalizar_texto).apply(correccion_manual_distrito)
+df['distrito_filtro'] = df['distrito'].apply(clave_filtro_texto)
 df['_ubigeo_distrito'] = df['ubigeo'].apply(normalizar_ubigeo)
 todos_cambios = {}
 
@@ -348,8 +383,16 @@ print("GUARDANDO DATASET LIMPIO")
 print("-" * 100)
 
 df = df.drop(columns=['_ubigeo_distrito'])
-df.to_csv("DataSet_LIMPIO.csv", encoding='utf-8', sep=';', index=False)
-print("\nArchivo guardado: DataSet_LIMPIO.csv")
+archivo_salida = "DataSet_LIMPIO.csv"
+try:
+    df.to_csv(archivo_salida, encoding='utf-8-sig', sep=';', index=False)
+except PermissionError:
+    archivo_salida = "DataSet_LIMPIO_actualizado.csv"
+    df.to_csv(archivo_salida, encoding='utf-8-sig', sep=';', index=False)
+    print("\nATENCION: DataSet_LIMPIO.csv esta abierto o bloqueado.")
+    print("Se guardo una copia actualizada en: {}".format(archivo_salida))
+
+print("\nArchivo guardado: {}".format(archivo_salida))
 print("Listado guardado: distritos_unicos.txt")
 
 print("\n" + "=" * 100)
