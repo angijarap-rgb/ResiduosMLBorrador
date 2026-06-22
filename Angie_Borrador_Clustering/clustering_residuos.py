@@ -6,18 +6,19 @@ import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from sklearn.decomposition import PCA # [MEJORA] Importado para la visualización final
 
-# carga del dataset
+# ==========================================
+# 1. CARGA Y LIMPIEZA DE DATASET
+# ==========================================
 
-
-RUTA_DATA = os.path.join("data", "../DataSet_LIMPIO.csv")
-
+RUTA_DATA = os.path.join("data", "DataSet_LIMPIO.csv") 
 df = pd.read_csv(RUTA_DATA, encoding="utf-8", sep=";")
 
 print("Dataset cargado:", df.shape)
 print(df.head(3))
 
-# Por si las columnas no vinieran ya estandarizadas
+# Estandarización de nombres de columnas
 df.columns = (
     df.columns
     .str.strip()
@@ -28,9 +29,9 @@ df.columns = (
 
 df = df.sort_values(["ubigeo", "periodo"])
 
-
-# variables derivadas
-
+# ==========================================
+# 2. VARIABLES DERIVADAS
+# ==========================================
 df["porc_urbana"] = np.where(
     df["pob_total"] > 0,
     df["pob_urbana"] / df["pob_total"],
@@ -60,21 +61,26 @@ print("\nVariables derivadas calculadas correctamente.")
 print(df[["ubigeo", "distrito", "periodo", "qresiduos_dom",
           "porc_urbana", "residuos_kg_hab_anual"]].head())
 
-
-
-# clustering por distritos
-
+# ==========================================
+# 3. CLUSTERING POR DISTRITOS
+# ==========================================
 os.makedirs("resultados_clustering", exist_ok=True)
 
-# Construcción una fila por distrito (promedio historico 2014-2024)
+# [MEJORA] Ordenamos base explícitamente antes del agrupar
+df_clust_base = df.sort_values(["ubigeo", "periodo"]).copy()
+
+# [MEJORA] Agrupamos SOLO por ubigeo para evitar duplicados si cambian los nombres, y extraemos el último nombre disponible.
 df_cluster = (
-    df.groupby(["ubigeo", "departamento", "provincia", "distrito"])
+    df_clust_base.groupby("ubigeo")
     .agg(
+        departamento=("departamento", "last"),
+        provincia=("provincia", "last"),
+        distrito=("distrito", "last"),
         pob_total_prom=("pob_total", "mean"),
         porc_urbana_prom=("porc_urbana", "mean"),
         qresiduos_dom_prom=("qresiduos_dom", "mean"),
         residuos_kg_hab_anual_prom=("residuos_kg_hab_anual", "mean"),
-        variacion_anual_prom=("variacion_anual_residuos", "mean")
+        variacion_anual_prom=("variacion_anual_residuos", "mean") # Mantenemos la variable original válida
     )
     .reset_index()
 )
@@ -87,10 +93,11 @@ variables_cluster = [
     "variacion_anual_prom"
 ]
 
-# Quitar distritos sin datos suficientes
+# [MEJORA] Aseguramos limpieza integral de infinitos generados pre-agrupación
+df_cluster = df_cluster.replace([np.inf, -np.inf], np.nan)
 df_cluster = df_cluster.dropna(subset=variables_cluster)
 
-# Quitar valores extremos de variacion anual (distritos con datos atipicos)
+# Quitar valores extremos de variacion anual 
 limite_inf = df_cluster["variacion_anual_prom"].quantile(0.01)
 limite_sup = df_cluster["variacion_anual_prom"].quantile(0.99)
 df_cluster = df_cluster[
@@ -128,8 +135,20 @@ for k in rango_k:
     inercias.append(km_prueba.inertia_)
     siluetas.append(silhouette_score(X_cluster, etiquetas_prueba))
 
+# [MEJORA] Guardado de tabla de evaluación de K en DataFrame y exportación
+df_eval_k = pd.DataFrame({
+    "k": list(rango_k),
+    "inercia": inercias,
+    "silueta": siluetas
+})
+
+print("\nEvaluación de K:")
+print(df_eval_k)
+df_eval_k.to_excel("resultados_clustering/evaluacion_k_clustering.xlsx", index=False)
+
+# Grafico Codo
 plt.figure(figsize=(8, 5))
-plt.plot(list(rango_k), inercias, marker="o")
+plt.plot(df_eval_k["k"], df_eval_k["inercia"], marker="o")
 plt.title("Metodo del codo - Clustering de distritos")
 plt.xlabel("Numero de clusters (K)")
 plt.ylabel("Inercia")
@@ -138,8 +157,9 @@ plt.tight_layout()
 plt.savefig("resultados_clustering/metodo_codo.png")
 plt.close()
 
+# Grafico Silueta
 plt.figure(figsize=(8, 5))
-plt.plot(list(rango_k), siluetas, marker="o", color="orange")
+plt.plot(df_eval_k["k"], df_eval_k["silueta"], marker="o", color="orange")
 plt.title("Coeficiente de silueta por numero de clusters")
 plt.xlabel("Numero de clusters (K)")
 plt.ylabel("Silhouette score")
@@ -148,38 +168,41 @@ plt.tight_layout()
 plt.savefig("resultados_clustering/silhouette_por_k.png")
 plt.close()
 
-# K=4 ofrece grupos interpretables y balanceados para este dataset
+# Ejecución modelo final K=4
 k_elegido = 4
-
 kmeans_final = KMeans(n_clusters=k_elegido, random_state=42, n_init=10)
 df_cluster["cluster"] = kmeans_final.fit_predict(X_cluster)
 
 print("\nDistritos por cluster:")
 print(df_cluster["cluster"].value_counts())
 
-#  promedio de cada variable por cluster
+# Resumen de cada variable por cluster
 resumen_clusters = (
     df_cluster.groupby("cluster")[variables_cluster]
     .mean()
     .round(2)
 )
 
+# [MEJORA] Añadimos cantidad de distritos al reporte de resumen
+resumen_clusters["cantidad_distritos"] = df_cluster.groupby("cluster")["ubigeo"].count()
+
 print("\nResumen de cada cluster (variables originales):")
 print(resumen_clusters)
 
 resumen_clusters.to_excel("resultados_clustering/resumen_clusters.xlsx")
 
-# Asignar nombre descriptivo segun el patron de cada cluster
+# [MEJORA] Lógica más limpia e infalible para nombrar los clusters (basada en .idxmax)
+cluster_mayor_poblacion = resumen_clusters["pob_total_prom"].idxmax()
+cluster_menor_poblacion = resumen_clusters["pob_total_prom"].idxmin()
+cluster_mayor_crecimiento = resumen_clusters["variacion_anual_prom"].idxmax() # Usando variable válida
+
 nombres_cluster = {}
 for c in resumen_clusters.index:
-    pob = resumen_clusters.loc[c, "pob_total_prom"]
-    var = resumen_clusters.loc[c, "variacion_anual_prom"]
-
-    if pob == resumen_clusters["pob_total_prom"].max():
+    if c == cluster_mayor_poblacion:
         nombres_cluster[c] = "Grandes urbes"
-    elif var == resumen_clusters["variacion_anual_prom"].max():
+    elif c == cluster_mayor_crecimiento:
         nombres_cluster[c] = "Crecimiento acelerado"
-    elif pob == resumen_clusters["pob_total_prom"].min():
+    elif c == cluster_menor_poblacion:
         nombres_cluster[c] = "Distritos pequenos"
     else:
         nombres_cluster[c] = "Distritos tipicos"
@@ -199,10 +222,11 @@ df_cluster_resultado = df_cluster[
     ]
 ]
 
-df_cluster_resultado.to_excel(
-    "resultados_clustering/distritos_con_cluster.xlsx",
-    index=False
-)
+df_cluster_resultado.to_excel("resultados_clustering/distritos_con_cluster.xlsx", index=False)
+
+# ==========================================
+# 4. GRÁFICOS RESULTANTES
+# ==========================================
 
 # GRAFICO: distribucion de distritos por cluster
 plt.figure(figsize=(7, 5))
@@ -225,7 +249,6 @@ for c in sorted(df_cluster["cluster"].unique()):
         label=nombres_cluster[c],
         alpha=0.6
     )
-
 plt.xscale("log")
 plt.yscale("log")
 plt.title("Distritos agrupados por poblacion y generacion de residuos")
@@ -238,18 +261,43 @@ plt.close()
 
 # Grafco - residuos per capita por cluster
 plt.figure(figsize=(8, 5))
+clusters_ordenados = sorted(df_cluster["cluster"].unique())
 datos_boxplot = [
     df_cluster[df_cluster["cluster"] == c]["residuos_kg_hab_anual_prom"]
-    for c in sorted(df_cluster["cluster"].unique())
+    for c in clusters_ordenados
 ]
-etiquetas_boxplot = [nombres_cluster[c] for c in sorted(df_cluster["cluster"].unique())]
+etiquetas_boxplot = [nombres_cluster[c] for c in clusters_ordenados]
 
-plt.boxplot(datos_boxplot, tick_labels=etiquetas_boxplot)
+plt.boxplot(datos_boxplot, labels=etiquetas_boxplot)
 plt.title("Residuos por habitante urbano segun grupo de distrito")
 plt.ylabel("Residuos (kg/habitante/anio)")
 plt.xticks(rotation=15)
 plt.tight_layout()
 plt.savefig("resultados_clustering/boxplot_residuos_por_cluster.png")
+plt.close()
+
+# [MEJORA] Incorporación de PCA para visualización 2D integral de los clusters
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X_cluster)
+
+df_cluster["pca_1"] = X_pca[:, 0]
+df_cluster["pca_2"] = X_pca[:, 1]
+
+plt.figure(figsize=(8, 5))
+scatter = plt.scatter(
+    df_cluster["pca_1"],
+    df_cluster["pca_2"],
+    c=df_cluster["cluster"],
+    cmap='viridis',
+    alpha=0.6
+)
+# Agregamos leyenda básica de colores para el PCA
+plt.legend(handles=scatter.legend_elements()[0], labels=[nombres_cluster[c] for c in clusters_ordenados])
+plt.title("Visualización de clusters mediante PCA")
+plt.xlabel("Componente principal 1")
+plt.ylabel("Componente principal 2")
+plt.tight_layout()
+plt.savefig("resultados_clustering/clusters_pca.png")
 plt.close()
 
 print("\n" + "=" * 70)
